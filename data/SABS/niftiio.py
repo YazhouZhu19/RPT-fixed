@@ -1,9 +1,6 @@
 """
 Utils for datasets
 """
-import numpy as np
-
-import numpy as np
 import SimpleITK as sitk
 
 
@@ -45,4 +42,3 @@ def np2itk(img, ref_obj):
     itk_obj.SetOrigin( ref_obj.GetOrigin()  )
     itk_obj.SetDirection( ref_obj.GetDirection()  )
     return itk_obj
-

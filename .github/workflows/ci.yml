@@ -1,0 +1,28 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  lightweight-checks:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.9'
+          cache: pip
+      - name: Install test dependencies
+        run: python -m pip install numpy==1.22.0 pyflakes==3.2.0 pytest==8.3.5
+      - name: Check Python syntax
+        run: python -m compileall -q .
+      - name: Run static checks
+        run: find . -name '*.py' ! -path './config.py' -print0 | xargs -0 python -m pyflakes
+      - name: Check shell syntax
+        run: find . -name '*.sh' -print0 | xargs -0 -n1 bash -n
+      - name: Run regression tests
+        run: python -m pytest -q tests

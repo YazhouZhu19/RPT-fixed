@@ -1,21 +1,39 @@
-import numpy as np
 import os
 import glob
+import re
 import SimpleITK as sitk
-
-import sys
-import niftiio as nio
 
 
 IMG_FOLDER="./data/SABS/img/"
 SEG_FOLDER="./data/SABS/label/"
 OUT_FOLDER="./tmp_normalized/"
 
-imgs = glob.glob(IMG_FOLDER + "/*.nii.gz")
-imgs = [ fid for fid in sorted(imgs) ]
-segs = [ fid for fid in sorted(glob.glob(SEG_FOLDER + "/*.nii.gz")) ]
+def case_id(path):
+    match = re.search(r'(\d+)(?=\.nii(?:\.gz)?$)', os.path.basename(path))
+    if match is None:
+        raise ValueError(f'Cannot extract case id from {path}')
+    return int(match.group(1))
 
-pids = [   pid.split("img0")[-1].split(".")[0] for pid in imgs]
+
+def index_cases(paths, kind):
+    indexed = {}
+    for path in paths:
+        identifier = case_id(path)
+        if identifier in indexed:
+            raise ValueError(f'Duplicate {kind} case id {identifier}')
+        indexed[identifier] = path
+    return indexed
+
+
+images = index_cases(glob.glob(IMG_FOLDER + "/*.nii.gz"), 'image')
+labels = index_cases(glob.glob(SEG_FOLDER + "/*.nii.gz"), 'label')
+if not images:
+    raise ValueError(f'No input images found in {IMG_FOLDER}')
+if set(images) != set(labels):
+    raise ValueError(
+        f'Image/label case ids differ: {sorted(set(images).symmetric_difference(labels))}'
+    )
+cases = [(images[identifier], labels[identifier]) for identifier in sorted(images)]
 
 
 # helper function
@@ -25,14 +43,13 @@ def copy_spacing_ori(src, dst):
     dst.SetDirection(src.GetDirection())
     return dst
 
-import copy
 scan_dir = OUT_FOLDER
 LIR = -125
 HIR = 275
 os.makedirs(scan_dir, exist_ok = True)
 
 reindex = 0
-for img_fid, seg_fid, pid in zip(imgs, segs, pids):
+for img_fid, seg_fid in cases:
 
     img_obj = sitk.ReadImage( img_fid )
     seg_obj = sitk.ReadImage( seg_fid )
@@ -42,7 +59,10 @@ for img_fid, seg_fid, pid in zip(imgs, segs, pids):
     array[array > HIR] = HIR
     array[array < LIR] = LIR
     
-    array = (array - array.min()) / (array.max() - array.min()) * 255.0
+    intensity_range = array.max() - array.min()
+    if intensity_range == 0:
+        raise ValueError(f'Cannot normalize constant image {img_fid}')
+    array = (array - array.min()) / intensity_range * 255.0
     
     # then normalize this
     
@@ -58,7 +78,4 @@ for img_fid, seg_fid, pid in zip(imgs, segs, pids):
     print("{} has been save".format(out_img_fid))
     print("{} has been save".format(out_lb_fid))
     reindex += 1
-
-
-
 

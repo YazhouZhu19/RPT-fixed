@@ -1,0 +1,15 @@
+Cython==0.29.37
+json5==0.8.5
+jupyter==1.0.0
+matplotlib==3.5.3
+nibabel==3.2.2
+numpy==1.22.0
+opencv-python==4.5.5.62
+Pillow>=8.1.1
+sacred==0.8.2
+scikit-image==0.18.3
+scipy==1.7.3
+SimpleITK==2.1.1.2
+torch==1.10.2
+torchvision==0.11.3
+tqdm==4.62.3

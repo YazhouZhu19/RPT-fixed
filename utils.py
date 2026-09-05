@@ -5,8 +5,6 @@ Extended from ADNet code by Hansen et al.
 import random
 import torch
 import numpy as np
-import operator
-import os
 import logging
 
 
@@ -15,8 +13,10 @@ def set_seed(seed):
     Set the random seed
     """
     random.seed(seed)
+    np.random.seed(seed)
     torch.manual_seed(seed)
-    torch.cuda.manual_seed_all(seed)
+    if torch.cuda.is_available():
+        torch.cuda.manual_seed_all(seed)
 
 
 CLASS_LABELS = {
@@ -94,8 +94,16 @@ class Scores():
         fp = torch.sum((label == 0) * (preds == 1))
         fn = torch.sum((label == 1) * (preds == 0))
 
-        self.patient_dice.append(2 * tp / (2 * tp + fp + fn))
-        self.patient_iou.append(tp / (tp + fp + fn))
+        dice_denominator = 2 * tp + fp + fn
+        iou_denominator = tp + fp + fn
+        self.patient_dice.append(
+            torch.ones_like(tp, dtype=torch.float32)
+            if dice_denominator == 0 else 2 * tp / dice_denominator
+        )
+        self.patient_iou.append(
+            torch.ones_like(tp, dtype=torch.float32)
+            if iou_denominator == 0 else tp / iou_denominator
+        )
 
         self.TP += tp
         self.TN += tn
@@ -103,10 +111,16 @@ class Scores():
         self.FN += fn
 
     def compute_dice(self):
-        return 2 * self.TP / (2 * self.TP + self.FP + self.FN)
+        denominator = 2 * self.TP + self.FP + self.FN
+        if denominator == 0:
+            return torch.tensor(1.0)
+        return 2 * self.TP / denominator
 
     def compute_iou(self):
-        return self.TP / (self.TP + self.FP + self.FN)
+        denominator = self.TP + self.FP + self.FN
+        if denominator == 0:
+            return torch.tensor(1.0)
+        return self.TP / denominator
 
 
 def set_logger(path):

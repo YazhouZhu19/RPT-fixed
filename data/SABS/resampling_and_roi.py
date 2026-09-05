@@ -1,17 +1,37 @@
 import numpy as np
 import os
 import glob
+import re
 import SimpleITK as sitk
-import sys
-import niftiio as nio
 
 IMG_FOLDER = "./tmp_normalized/"
 SEG_FOLDER = IMG_FOLDER
-imgs = glob.glob(IMG_FOLDER + "/image_*.nii.gz")
-imgs = [ fid for fid in sorted(imgs) ]
-segs = [ fid for fid in sorted(glob.glob(SEG_FOLDER + "/label_*.nii.gz")) ]
+def case_id(path):
+    match = re.search(r'(\d+)(?=\.nii(?:\.gz)?$)', os.path.basename(path))
+    if match is None:
+        raise ValueError(f'Cannot extract case id from {path}')
+    return int(match.group(1))
 
-pids = [pid.split("_")[-1].split(".")[0] for pid in imgs]
+
+def index_cases(paths, kind):
+    indexed = {}
+    for path in paths:
+        identifier = case_id(path)
+        if identifier in indexed:
+            raise ValueError(f'Duplicate {kind} case id {identifier}')
+        indexed[identifier] = path
+    return indexed
+
+
+images = index_cases(glob.glob(IMG_FOLDER + "/image_*.nii.gz"), 'image')
+labels = index_cases(glob.glob(SEG_FOLDER + "/label_*.nii.gz"), 'label')
+if not images:
+    raise ValueError(f'No input images found in {IMG_FOLDER}')
+if set(images) != set(labels):
+    raise ValueError(
+        f'Image/label case ids differ: {sorted(set(images).symmetric_difference(labels))}'
+    )
+cases = [(images[identifier], labels[identifier], identifier) for identifier in sorted(images)]
 
 # helper functions copy pasted
 def resample_by_res(mov_img_obj, new_spacing, interpolator = sitk.sitkLinear, logging = True):
@@ -49,13 +69,15 @@ def resample_lb_by_res(mov_lb_obj, new_spacing, interpolator = sitk.sitkLinear, 
             out_vol[_tar_curr_mat == lbv] = lbv
     out_obj = sitk.GetImageFromArray(out_vol)
     out_obj.SetSpacing( _tar_curr_obj.GetSpacing() )
-    if ref_img != None:
+    if ref_img is not None:
         out_obj.CopyInformation(ref_img)
     return out_obj
         
 ## Then crop ROI
 def get_label_center(label):
     nnz = np.sum(label > 1e-5)
+    if nnz == 0:
+        raise ValueError('Cannot calculate the center of an empty label')
     return np.int32(np.rint(np.sum(np.nonzero(label), axis = 1) * 1.0 / nnz))
 
 def image_crop(ori_vol, crop_size, referece_ctr_idx, padval = 0., only_2d = True):
@@ -117,7 +139,6 @@ def copy_spacing_ori(src, dst):
     dst.SetDirection(src.GetDirection())
     return dst
 
-import copy
 OUT_FOLDER = "./sabs_CT_normalized"
 scan_dir = OUT_FOLDER
 os.makedirs(scan_dir, exist_ok = True)
@@ -125,9 +146,7 @@ BD_BIAS = 32 # cut irrelavent empty boundary to make roi stands out
 
 SPA_FAC = (512 - 2 * BD_BIAS) / 256 # spacing factor
 
-for img_fid, seg_fid, pid in zip(imgs, segs, pids):
-
-    lb_n = nio.read_nii_bysitk(seg_fid)
+for img_fid, seg_fid, pid in cases:
 
     img_obj = sitk.ReadImage( img_fid )
     seg_obj = sitk.ReadImage( seg_fid )

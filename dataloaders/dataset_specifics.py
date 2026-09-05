@@ -3,8 +3,9 @@ Dataset Specifics
 Extended from ADNet code by Hansen et al.
 """
 
-import torch
 import random
+
+import numpy as np
 
 
 def get_label_names(dataset):
@@ -41,37 +42,51 @@ def get_label_names(dataset):
 
 
 def get_folds(dataset):
+    """Return ordered evaluation folds.
+
+    The final case in every fold is the dedicated support case.  The preceding
+    cases form disjoint query partitions; keeping this as a list is therefore
+    important (a set loses the support position).
+    """
     FOLD = {}
     if dataset == 'CMR':
-        FOLD[0] = set(range(0, 8))
-        FOLD[1] = set(range(7, 15))
-        FOLD[2] = set(range(14, 22))
-        FOLD[3] = set(range(21, 29))
-        FOLD[4] = set(range(28, 35))
-        FOLD[4].update([0])
+        FOLD[0] = list(range(0, 8))
+        FOLD[1] = list(range(7, 15))
+        FOLD[2] = list(range(14, 22))
+        FOLD[3] = list(range(21, 29))
+        FOLD[4] = list(range(28, 35)) + [0]
         return FOLD
 
     elif dataset == 'CHAOST2':
-        FOLD[0] = set(range(0, 5))
-        FOLD[1] = set(range(4, 9))
-        FOLD[2] = set(range(8, 13))
-        FOLD[3] = set(range(12, 17))
-        FOLD[4] = set(range(16, 20))
-        FOLD[4].update([0])
+        FOLD[0] = list(range(0, 5))
+        FOLD[1] = list(range(4, 9))
+        FOLD[2] = list(range(8, 13))
+        FOLD[3] = list(range(12, 17))
+        FOLD[4] = list(range(16, 20)) + [0]
         return FOLD
     elif dataset == 'SABS':
-        FOLD[0] = set(range(0, 7))
-        FOLD[1] = set(range(6, 13))
-        FOLD[2] = set(range(12, 19))
-        FOLD[3] = set(range(18, 25))
-        FOLD[4] = set(range(24, 30))
-        FOLD[4].update([0])
+        FOLD[0] = list(range(0, 7))
+        FOLD[1] = list(range(6, 13))
+        FOLD[2] = list(range(12, 19))
+        FOLD[3] = list(range(18, 25))
+        FOLD[4] = list(range(24, 30)) + [0]
         return FOLD
     else:
         raise ValueError(f'Dataset: {dataset} not found')
 
 
+def get_excluded_slice_indices(labels, excluded_labels):
+    """Return slices containing any held-out class (Setting 2)."""
+    if excluded_labels is None or len(excluded_labels) == 0:
+        return np.empty(0, dtype=np.int64)
+
+    excluded_mask = np.isin(labels, excluded_labels).any(axis=(1, 2))
+    return np.flatnonzero(excluded_mask)
+
+
 def sample_xy(spr, k=0, b=215):
+    import torch
+
     _, h, v = torch.where(spr)
 
     if len(h) == 0 or len(v) == 0:

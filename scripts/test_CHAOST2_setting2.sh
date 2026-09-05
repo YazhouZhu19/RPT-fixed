@@ -17,7 +17,7 @@ SNAPSHOT_INTERVAL=1000 # interval for saving snapshot
 SEED=2021
 
 N_PART=3 # defines the number of chunks for evaluation
-ALL_SUPP=(2) # CHAOST2: 0-4, CMR: 0-7
+ALL_SUPP=(-1) # use the dedicated final support case in each ordered fold
 echo ========================================================================
 
 for EVAL_FOLD in "${ALL_EV[@]}"
@@ -32,8 +32,7 @@ do
   fi
   for SUPP_IDX in "${ALL_SUPP[@]}"
   do
-    # RELOAD_PATH='please feed the absolute path to the trained weights here' # path to the reloaded model
-    RELOAD_MODEL_PATH=".../exps_on_CHAOST2_fewshot_setting2/RPT_train_CHAOST2_cv${EVAL_FOLD}/1/snapshots/30000.pth"
+    CHECKPOINT_PATH="${RELOAD_MODEL_PATH:-./exps_on_CHAOST2_fewshot_setting2/RPT_train_CHAOST2_cv${EVAL_FOLD}/1/snapshots/40000.pth}"
     python3 test.py with \
     mode="test" \
     dataset=$DATASET \
@@ -45,10 +44,9 @@ do
     test_label=$TEST_LABEL \
     seed=$SEED \
     n_part=$N_PART \
-    reload_model_path=$RELOAD_MODEL_PATH \
+    reload_model_path="$CHECKPOINT_PATH" \
     save_snapshot_every=$SNAPSHOT_INTERVAL \
     lr_step_gamma=$DECAY \
     path.log_dir=$LOGDIR
     done
 done
-

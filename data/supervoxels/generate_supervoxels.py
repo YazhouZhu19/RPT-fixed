@@ -1,101 +1,101 @@
-"""
-Modified from Ouyang et al.
-https://github.com/cheng-01037/Self-supervised-Fewshot-Medical-Image-Segmentation
-"""
+"""Generate 3D Felzenszwalb supervoxels for an RPT dataset."""
 
-import os
-import SimpleITK as sitk
+import argparse
 import glob
+import os
+from pathlib import Path
+
+import numpy as np
+import SimpleITK as sitk
+from scipy.ndimage import binary_fill_holes
 from skimage.measure import label
-import scipy.ndimage.morphology as snm
-from felzenszwalb_3d import *
 
-base_dir = '../../data/SABS/sabs_CT_normalized'
-# base_dir = '../../data/CHAOST2/chaos_MR_T2_normalized'
-# base_dir = '<path_to_data>/CMR/cmr_MR_normalized'
-
-imgs = glob.glob(os.path.join(base_dir, 'image*'))
-labels = glob.glob(os.path.join(base_dir, 'label*'))
-
-imgs = sorted(imgs, key=lambda x: int(x.split('_')[-1].split('.nii.gz')[0]))
-labels = sorted(labels, key=lambda x: int(x.split('_')[-1].split('.nii.gz')[0]))
-
-fg_thresh = 10
-
-MODE = 'MIDDLE'
-n_sv = 5000
-# n_sv = 1000
-# if ~os.path.exists(f'../../data/CHAOST2/supervoxels_{n_sv}/'):
-#     os.mkdir(f'../../data/CHAOST2/supervoxels_{n_sv}/')
-if ~os.path.exists(f'../../data/SABS/supervoxels_{n_sv}/'):
-    os.mkdir(f'../../data/SABS/supervoxels_{n_sv}/')
+from felzenszwalb_3d import felzenszwalb_3d
 
 
-def read_nii_bysitk(input_fid):
-    """ read nii to numpy through simpleitk
-        peelinfo: taking direction, origin, spacing and metadata out
-    """
-    img_obj = sitk.ReadImage(input_fid)
-    img_np = sitk.GetArrayFromImage(img_obj)
-    return img_np
+DATASETS = {
+    'SABS': ('SABS/sabs_CT_normalized', 5000),
+    'CHAOST2': ('CHAOST2/chaos_MR_T2_normalized', 5000),
+    'CMR': ('CMR/cmr_MR_normalized', 1000),
+}
 
 
-# thresholding the intensity values to get a binary mask of the patient
-def fg_mask2d(img_2d, thresh):
-    mask_map = np.float32(img_2d > thresh)
-
-    def getLargestCC(segmentation):  # largest connected components
-        labels = label(segmentation)
-        assert (labels.max() != 0)  # assume at least 1 CC
-        largestCC = labels == np.argmax(np.bincount(labels.flat)[1:]) + 1
-        return largestCC
-
-    if mask_map.max() < 0.999:
-        return mask_map
-    else:
-        post_mask = getLargestCC(mask_map)
-        fill_mask = snm.binary_fill_holes(post_mask)
-    return fill_mask
+def foreground_mask_2d(image, threshold):
+    mask = image > threshold
+    components = label(mask)
+    if components.max() == 0:
+        return np.zeros_like(mask, dtype=bool)
+    largest = components == np.argmax(np.bincount(components.flat)[1:]) + 1
+    return binary_fill_holes(largest)
 
 
-# remove supervoxels within the empty regions
-def supervox_masking(seg, mask):
-    seg[seg == 0] = seg.max() + 1
-    seg = np.int32(seg)
-    seg[mask == 0] = 0
+def mask_supervoxels(segmentation, foreground_mask):
+    segmentation = segmentation.copy()
+    segmentation[segmentation == 0] = segmentation.max() + 1
+    segmentation = segmentation.astype(np.int32, copy=False)
+    segmentation[~foreground_mask] = 0
+    return segmentation
 
-    return seg
+
+def generate(dataset, n_supervoxels=None, mode='MIDDLE', foreground_threshold=10):
+    relative_input, default_n_supervoxels = DATASETS[dataset]
+    if n_supervoxels is None:
+        n_supervoxels = default_n_supervoxels
+
+    data_root = Path(__file__).resolve().parents[1]
+    input_dir = data_root / relative_input
+    output_dir = data_root / dataset / f'supervoxels_{n_supervoxels}'
+    output_dir.mkdir(parents=True, exist_ok=True)
+
+    images = sorted(
+        glob.glob(os.path.join(input_dir, 'image*')),
+        key=lambda path: int(path.rsplit('_', 1)[-1].split('.nii.gz')[0]),
+    )
+    if not images:
+        raise ValueError(f'No normalized images found in {input_dir}')
+
+    for image_path in images:
+        source_image = sitk.ReadImage(image_path)
+        image = sitk.GetArrayFromImage(source_image)
+        intensity_range = np.ptp(image)
+        if intensity_range == 0:
+            raise ValueError(f'Cannot generate supervoxels for constant image {image_path}')
+        image = 255 * (image - image.min()) / intensity_range
+
+        spacing_xyz = source_image.GetSpacing()
+        spacing_zyx = (spacing_xyz[2], spacing_xyz[1], spacing_xyz[0])
+        segmentation = felzenszwalb_3d(
+            image, min_size=n_supervoxels, sigma=0, spacing=spacing_zyx
+        )
+
+        foreground = np.stack([
+            foreground_mask_2d(image_slice, foreground_threshold)
+            for image_slice in image
+        ])
+        segmentation = mask_supervoxels(segmentation, foreground)
+
+        output_image = sitk.GetImageFromArray(segmentation)
+        output_image.CopyInformation(source_image)
+        case_id = os.path.basename(image_path).rsplit('_', 1)[-1].split('.nii.gz')[0]
+        output_path = output_dir / f'superpix-{mode}_{case_id}.nii.gz'
+        sitk.WriteImage(output_image, str(output_path), True)
+        print(f'Case {case_id} saved to {output_path}')
 
 
-# make supervoxels
-for img_path in imgs:
-    img = read_nii_bysitk(img_path)
-    img = 255 * (img - img.min()) / img.ptp()
+def parse_args():
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument('--dataset', choices=DATASETS, default='SABS')
+    parser.add_argument('--n-supervoxels', type=int, default=None)
+    parser.add_argument('--mode', default='MIDDLE')
+    parser.add_argument('--foreground-threshold', type=float, default=10)
+    return parser.parse_args()
 
-    reader = sitk.ImageFileReader()
-    reader.SetFileName(img_path)
-    reader.LoadPrivateTagsOn()
-    reader.ReadImageInformation()
 
-    x = float(reader.GetMetaData('pixdim[1]'))
-    y = float(reader.GetMetaData('pixdim[2]'))
-    z = float(reader.GetMetaData('pixdim[3]'))
-
-    segments_felzenszwalb = felzenszwalb_3d(img, min_size=n_sv, sigma=0, spacing=(z, x, y))
-
-    # post processing: remove bg (low intensity regions)
-    fg_mask_vol = np.zeros(segments_felzenszwalb.shape)
-    for ii in range(segments_felzenszwalb.shape[0]):
-        _fgm = fg_mask2d(img[ii, ...], fg_thresh)
-        fg_mask_vol[ii] = _fgm
-    processed_seg_vol = supervox_masking(segments_felzenszwalb, fg_mask_vol)
-
-    # write to nii.gz
-    out_seg = sitk.GetImageFromArray(processed_seg_vol)
-
-    idx = os.path.basename(img_path).split("_")[-1].split(".nii.gz")[0]
-
-    seg_fid = os.path.join(f'../../data/SABS/supervoxels_{n_sv}/', f'superpix-{MODE}_{idx}.nii.gz')
-    # seg_fid = os.path.join(f'../../data/CHAOST2/supervoxels_{n_sv}/', f'superpix-{MODE}_{idx}.nii.gz')
-    sitk.WriteImage(out_seg, seg_fid)
-    print(f'image with id {idx} has finished')
+if __name__ == '__main__':
+    cli_args = parse_args()
+    generate(
+        dataset=cli_args.dataset,
+        n_supervoxels=cli_args.n_supervoxels,
+        mode=cli_args.mode,
+        foreground_threshold=cli_args.foreground_threshold,
+    )

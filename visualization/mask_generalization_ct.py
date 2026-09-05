@@ -2,11 +2,6 @@
 
 import os
 import cv2
-import numpy as np
-import SimpleITK as itk
-import matplotlib.pyplot as plt
-import matplotlib
-import cv2
 import SimpleITK as itk
 
 # Abd_CT dataset
@@ -36,6 +31,7 @@ abd_ct_liver_gt = 1 * (abd_ct_gt == 6)
 idx = abd_ct_liver_gt.sum(axis=(1, 2)) > 0
 abd_ct_liver_gt = abd_ct_liver_gt[idx]
 abd_ct_img_liver = abd_ct_img[idx]
+abd_ct_liver = abd_ct_liver[idx]
 
 abd_ct_liver_gt_show = abd_ct_liver_gt[16] * 200  # choose the 16th slice of case x to illustrate, you also can choose other slices
 abd_ct_img_show_1 = abd_ct_img_liver[16]
@@ -57,9 +53,11 @@ abd_ct_spleen_gt = 1 * (abd_ct_gt == 1)
 idx = abd_ct_spleen_gt.sum(axis=(1, 2)) > 0
 abd_ct_spleen_gt = abd_ct_spleen_gt[idx]
 abd_ct_img_spleen = abd_ct_img[idx]
+abd_ct_spleen = abd_ct_spleen[idx]
 
 abd_ct_spleen_gt_show = abd_ct_spleen_gt[14]*200
 abd_ct_img_show_2 = abd_ct_img_spleen[14]
+abd_ct_spleen_show = abd_ct_spleen[14] * 200
 
 abd_ct_spleen_spt = abd_ct_spleen_gt[8]*200
 abd_ct_img_spt = abd_ct_img_spleen[8]
@@ -77,9 +75,11 @@ abd_ct_rk_gt = 1 * (abd_ct_gt == 2)
 idx = abd_ct_rk_gt.sum(axis=(1, 2)) > 0
 abd_ct_rk_gt = abd_ct_rk_gt[idx]
 abd_ct_img_rk = abd_ct_img[idx]
+abd_ct_rk = abd_ct_rk[idx]
 
 abd_ct_rk_gt_show = abd_ct_rk_gt[18]*200
 abd_ct_img_show_3 = abd_ct_img_rk[18]
+abd_ct_rk_show = abd_ct_rk[18] * 200
 
 abd_ct_rk_spt = abd_ct_rk_gt[10]*200
 abd_ct_img_spt = abd_ct_img_rk[10]
@@ -97,9 +97,11 @@ abd_ct_lk_gt = 1 * (abd_ct_gt == 3)
 idx = abd_ct_lk_gt.sum(axis=(1, 2)) > 0
 abd_ct_lk_gt = abd_ct_lk_gt[idx]
 abd_ct_img_lk = abd_ct_img[idx]
+abd_ct_lk = abd_ct_lk[idx]
 
 abd_ct_lk_gt_show = abd_ct_lk_gt[17]*200
 abd_ct_img_show_4 = abd_ct_img_lk[17]
+abd_ct_lk_show = abd_ct_lk[17] * 200
 
 abd_ct_lk_spt = abd_ct_lk_gt[8]*200
 abd_ct_img_spt = abd_ct_img_lk[8]
@@ -110,5 +112,3 @@ cv2.imwrite("./data/Abd_CT/abd_ct_lk.png", abd_ct_lk_show)
 
 cv2.imwrite("./data/Abd_CT/abd_ct_lk_spt.png", abd_ct_lk_spt)
 cv2.imwrite("./data/Abd_CT/abd_ct_lk_img_spt.png", abd_ct_img_spt)
-
-

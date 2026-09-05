@@ -2,11 +2,6 @@
 
 import os
 import cv2
-import numpy as np
-import SimpleITK as itk
-import matplotlib.pyplot as plt
-import matplotlib
-import cv2
 import SimpleITK as itk
 
 # Abd_MRI dataset
@@ -38,6 +33,7 @@ abd_mri_liver_gt = 1 * (abd_mri_gt == 1)
 idx = abd_mri_liver_gt.sum(axis=(1, 2)) > 0
 abd_mri_liver_gt = abd_mri_liver_gt[idx]
 abd_mri_img_liver = abd_mri_img[idx]
+abd_mri_liver = abd_mri_liver[idx]
 
 abd_mri_liver_gt_show = abd_mri_liver_gt[11] * 200    # choose the 11th slice of case x to illustrate, you also can choose other slices
 abd_mri_img_show_1 = abd_mri_img_liver[11] / 4.5
@@ -59,9 +55,11 @@ abd_mri_spleen_gt = 1 * (abd_mri_gt == 4)
 idx = abd_mri_spleen_gt.sum(axis=(1, 2)) > 0
 abd_mri_spleen_gt = abd_mri_spleen_gt[idx]
 abd_mri_img_spleen = abd_mri_img[idx]
+abd_mri_spleen = abd_mri_spleen[idx]
 
 abd_mri_spleen_gt_show = abd_mri_spleen_gt[10]*200
 abd_mri_img_show_2 = abd_mri_img_spleen[10] / 4.5
+abd_mri_spleen_show = abd_mri_spleen[10] * 200
 
 abd_mri_spleen_spt = abd_mri_spleen_gt[4]*200
 abd_mri_img_spt = abd_mri_img_spleen[4] / 4.5
@@ -79,9 +77,11 @@ abd_mri_rk_gt = 1 * (abd_mri_gt == 2)
 idx = abd_mri_rk_gt.sum(axis=(1, 2)) > 0
 abd_mri_rk_gt = abd_mri_rk_gt[idx]
 abd_mri_img_rk = abd_mri_img[idx]
+abd_mri_rk = abd_mri_rk[idx]
 
 abd_mri_rk_gt_show = abd_mri_rk_gt[10]*200
 abd_mri_img_show_3 = abd_mri_img_rk[10] / 4.5
+abd_mri_rk_show = abd_mri_rk[10] * 200
 
 abd_mri_rk_spt = abd_mri_rk_gt[11]*200
 abd_mri_img_spt = abd_mri_img_rk[11] / 4.5
@@ -99,9 +99,11 @@ abd_mri_lk_gt = 1 * (abd_mri_gt == 3)
 idx = abd_mri_lk_gt.sum(axis=(1, 2)) > 0
 abd_mri_lk_gt = abd_mri_lk_gt[idx]
 abd_mri_img_lk = abd_mri_img[idx]
+abd_mri_lk = abd_mri_lk[idx]
 
 abd_mri_lk_gt_show = abd_mri_lk_gt[11]*200
 abd_mri_img_show_4 = abd_mri_img_lk[11] / 4.5
+abd_mri_lk_show = abd_mri_lk[11] * 200
 
 abd_mri_lk_spt = abd_mri_lk_gt[5]*200
 abd_mri_img_spt = abd_mri_img_lk[5] / 4.5
@@ -112,4 +114,3 @@ cv2.imwrite("./data/Abd_MRI/abd_mri_lk.png", abd_mri_lk_show)
 
 cv2.imwrite("./data/Abd_MRI/abd_mri_lk_spt.png", abd_mri_lk_spt)
 cv2.imwrite("./data/Abd_MRI/abd_mri_lk_img_spt.png", abd_mri_img_spt)
-

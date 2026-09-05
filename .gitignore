@@ -1,0 +1,16 @@
+__pycache__/
+*.py[cod]
+*.so
+*.egg-info/
+build/
+.pytest_cache/
+.idea/
+.vscode/
+.DS_Store
+
+checkpoints/*.pth
+data/*/*_normalized/
+data/*/supervoxels_*/
+exps_on_*/
+results/
+runs/

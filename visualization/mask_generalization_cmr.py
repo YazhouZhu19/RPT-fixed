@@ -2,11 +2,6 @@
 
 import os
 import cv2
-import numpy as np
-import SimpleITK as itk
-import matplotlib.pyplot as plt
-import matplotlib
-import cv2
 import SimpleITK as itk
 
 # CMR dataset
@@ -35,9 +30,11 @@ cmr_lvbp_gt = 1 * (cmr_gt == 2)
 idx = cmr_lvbp_gt.sum(axis=(1, 2)) > 0
 cmr_lvbp_gt = cmr_lvbp_gt[idx]
 cmr_img_lvbp = cmr_img[idx]
+cmr_lvbp = cmr_lvbp[idx]
 
 cmr_lvbp_gt_show = cmr_lvbp_gt[4]*200                                   # choose the 4th slice of case x to illustrate, you also can choose other slices
 cmr_img_show_1 = cmr_img_lvbp[4] / 4.5
+cmr_img_lvbp_show = cmr_lvbp[4] * 200
 
 cmr_lvbp_spt = cmr_lvbp_gt[2]*200                                       # choose the 2th slice of case x as support image
 cmr_img_spt = cmr_img_lvbp[2] / 4.5
@@ -56,9 +53,11 @@ cmr_lvmyo_gt = 1 * (cmr_gt == 1)
 idx = cmr_lvmyo_gt.sum(axis=(1, 2)) > 0
 cmr_lvmyo_gt = cmr_lvmyo_gt[idx]
 cmr_img_lvmyo = cmr_img[idx]
+cmr_lvmyo = cmr_lvmyo[idx]
 
 cmr_lvmyo_gt_show = cmr_lvmyo_gt[6]*200
 cmr_img_show_2 = cmr_img_lvmyo[6] / 4.5
+cmr_img_lvmyo_show = cmr_lvmyo[6] * 200
 
 cmr_lvmyo_spt = cmr_lvmyo_gt[3]*200
 cmr_img_spt = cmr_img_lvmyo[3] / 4.5
@@ -76,9 +75,11 @@ cmr_rv_gt = 1 * (cmr_gt == 3)
 idx = cmr_rv_gt.sum(axis=(1, 2)) > 0
 cmr_rv_gt = cmr_rv_gt[idx]
 cmr_img_rv = cmr_img[idx]
+cmr_rv = cmr_rv[idx]
 
 cmr_rv_gt_show = cmr_rv_gt[2]*200
 cmr_img_show_3 = cmr_img_rv[2] / 4.5
+cmr_img_rv_show = cmr_rv[2] * 200
 
 cmr_rv_spt = cmr_rv_gt[5]*200
 cmr_img_spt = cmr_img_rv[5] / 4.5
@@ -89,8 +90,6 @@ cv2.imwrite("./data/CMR/cmr_rv.png", cmr_img_rv_show)
 
 cv2.imwrite("./data/CMR/cmr_rv_spt.png", cmr_rv_spt)
 cv2.imwrite("./data/CMR/cmr_rv_img_spt.png", cmr_img_spt)
-
-
 
 
 

@@ -11,7 +11,62 @@ import SimpleITK as sitk
 import random
 import numpy as np
 from . import image_transforms as myit
-from .dataset_specifics import *
+from .dataset_specifics import get_excluded_slice_indices, get_folds
+
+
+def _case_id(path):
+    try:
+        return int(os.path.basename(path).rsplit('_', 1)[-1].split('.', 1)[0])
+    except ValueError as exc:
+        raise ValueError(f'Cannot extract numeric case id from {path!r}') from exc
+
+
+def _index_cases(paths, kind):
+    indexed = {}
+    for path in paths:
+        case_id = _case_id(path)
+        if case_id in indexed:
+            raise ValueError(f'Duplicate {kind} case id {case_id}: {path!r}')
+        indexed[case_id] = path
+    return indexed
+
+
+def _align_case_paths(images, labels, supervoxels=None):
+    image_map = _index_cases(images, 'image')
+    label_map = _index_cases(labels, 'label')
+    if not image_map:
+        raise ValueError('No image cases were found; check data_dir and preprocessing outputs')
+    collections = {'images': image_map, 'labels': label_map}
+    if supervoxels is not None:
+        collections['supervoxels'] = _index_cases(supervoxels, 'supervoxel')
+
+    expected = set(image_map)
+    mismatches = {
+        name: sorted(expected.symmetric_difference(paths))
+        for name, paths in collections.items()
+        if set(paths) != expected
+    }
+    if mismatches:
+        raise ValueError(f'Case ids are not aligned across inputs: {mismatches}')
+
+    case_ids = sorted(expected)
+    aligned = [[paths[case_id] for case_id in case_ids] for paths in collections.values()]
+    return case_ids, aligned
+
+
+def _standardize_volume(image):
+    image = image.astype(np.float32, copy=False)
+    std = float(image.std())
+    if not np.isfinite(std) or std < np.finfo(np.float32).eps:
+        raise ValueError('Cannot standardize a constant or non-finite image volume')
+    return (image - float(image.mean())) / std
+
+
+def _contiguous_runs(indices):
+    if len(indices) == 0:
+        return []
+    split_points = np.flatnonzero(np.diff(indices) != 1) + 1
+    return np.split(indices, split_points)
 
 
 class TestDataset(Dataset):
@@ -20,36 +75,56 @@ class TestDataset(Dataset):
 
         # reading the paths
         if args['dataset'] == 'CMR':
-            self.image_dirs = glob.glob(os.path.join(args['data_dir'], 'cmr_MR_normalized/image*'))
+            data_dir = os.path.join(args['data_dir'], 'cmr_MR_normalized')
         elif args['dataset'] == 'CHAOST2':
-            self.image_dirs = glob.glob(os.path.join(args['data_dir'], 'chaos_MR_T2_normalized/image*'))
+            data_dir = os.path.join(args['data_dir'], 'chaos_MR_T2_normalized')
         elif args['dataset'] == 'SABS':
-            self.image_dirs = glob.glob(os.path.join(args['data_dir'], 'sabs_CT_normalized/image*'))
+            data_dir = os.path.join(args['data_dir'], 'sabs_CT_normalized')
+        else:
+            raise ValueError(f"Dataset: {args['dataset']} not found")
 
-        self.image_dirs = sorted(self.image_dirs, key=lambda x: int(x.split('_')[-1].split('.nii.gz')[0]))
+        image_dirs = glob.glob(os.path.join(data_dir, 'image*'))
+        label_dirs = glob.glob(os.path.join(data_dir, 'label*'))
+        _, (image_dirs, label_dirs) = _align_case_paths(image_dirs, label_dirs)
 
         # remove test fold!
         self.FOLD = get_folds(args['dataset'])
-        self.image_dirs = [elem for idx, elem in enumerate(self.image_dirs) if idx in self.FOLD[args['eval_fold']]]
+        fold_indices = self.FOLD[args['eval_fold']]
+        if max(fold_indices) >= len(image_dirs):
+            raise ValueError(
+                f"Fold {args['eval_fold']} expects at least {max(fold_indices) + 1} cases, "
+                f'but found {len(image_dirs)}'
+            )
+        self.image_dirs = [image_dirs[idx] for idx in fold_indices]
+        self.label_dirs = [label_dirs[idx] for idx in fold_indices]
 
         # split into support/query
-        idx = np.arange(len(self.image_dirs))
-        self.support_dir = self.image_dirs[idx[args['supp_idx']]]
-        self.image_dirs.pop(idx[args['supp_idx']])  # remove support
+        support_idx = args.get('supp_idx', -1)
+        if support_idx < 0:
+            support_idx += len(self.image_dirs)
+        expected_support_idx = len(self.image_dirs) - 1
+        if support_idx != expected_support_idx:
+            raise ValueError(
+                f'supp_idx must select the dedicated final support case '
+                f'({expected_support_idx} or -1), got {args.get("supp_idx")}'
+            )
+        self.support_dir = self.image_dirs.pop(support_idx)
+        self.support_label_dir = self.label_dirs.pop(support_idx)
         self.label = None
 
     def __len__(self):
         return len(self.image_dirs)
 
     def __getitem__(self, idx):
+        if self.label is None:
+            raise ValueError('Set TestDataset.label before iterating over query volumes')
 
         img_path = self.image_dirs[idx]
         img = sitk.GetArrayFromImage(sitk.ReadImage(img_path))
-        img = (img - img.mean()) / img.std()
+        img = _standardize_volume(img)
         img = np.stack(3 * [img], axis=1)
 
-        lbl = sitk.GetArrayFromImage(
-            sitk.ReadImage(img_path.split('image_')[0] + 'label_' + img_path.split('image_')[-1]))
+        lbl = sitk.GetArrayFromImage(sitk.ReadImage(self.label_dirs[idx]))
 
         lbl[lbl == 200] = 1
         lbl[lbl == 500] = 2
@@ -62,6 +137,8 @@ class TestDataset(Dataset):
         idx = lbl.sum(axis=(1, 2)) > 0
         sample['image'] = torch.from_numpy(img[idx])
         sample['label'] = torch.from_numpy(lbl[idx])
+        sample['slice_indices'] = torch.from_numpy(np.flatnonzero(idx))
+        sample['num_slices'] = lbl.shape[0]
 
         return sample
 
@@ -69,6 +146,8 @@ class TestDataset(Dataset):
         """
         Selecting intervals according to Ouyang et al.
         """
+        if n_shot < 1:
+            raise ValueError('n_shot must be at least 1')
         if n_shot == 1:
             pcts = [0.5]
         else:
@@ -84,11 +163,10 @@ class TestDataset(Dataset):
 
         img_path = self.support_dir
         img = sitk.GetArrayFromImage(sitk.ReadImage(img_path))
-        img = (img - img.mean()) / img.std()
+        img = _standardize_volume(img)
         img = np.stack(3 * [img], axis=1)
 
-        lbl = sitk.GetArrayFromImage(
-            sitk.ReadImage(img_path.split('image_')[0] + 'label_' + img_path.split('image_')[-1]))
+        lbl = sitk.GetArrayFromImage(sitk.ReadImage(self.support_label_dir))
         lbl[lbl == 200] = 1
         lbl[lbl == 500] = 2
         lbl[lbl == 600] = 3
@@ -103,6 +181,8 @@ class TestDataset(Dataset):
             if N is None:
                 raise ValueError('Need to specify number of labeled slices!')
             idx = lbl.sum(axis=(1, 2)) > 0
+            if not idx.any():
+                raise ValueError(f'Support case has no slices for label {label}')
             idx_ = self.get_support_index(N, idx.sum())
 
             sample['image'] = torch.from_numpy(img[idx][idx_])
@@ -125,6 +205,10 @@ class TrainDataset(Dataset):
         self.test_label = args['test_label']
         self.exclude_label = args['exclude_label']
         self.use_gt = args['use_gt']
+        if self.n_shot < 1:
+            raise ValueError('n_shot must be at least 1')
+        if self.n_way != 1 or self.n_query != 1:
+            raise ValueError('RPT training currently supports only n_way=1 and n_query=1')
 
         # reading the paths (leaving the reading of images into memory to __getitem__)
         if args['dataset'] == 'CMR':
@@ -136,11 +220,12 @@ class TrainDataset(Dataset):
         elif args['dataset'] == 'SABS':
             self.image_dirs = glob.glob(os.path.join(args['data_dir'], 'sabs_CT_normalized/image*'))
             self.label_dirs = glob.glob(os.path.join(args['data_dir'], 'sabs_CT_normalized/label*'))
+        else:
+            raise ValueError(f"Dataset: {args['dataset']} not found")
 
-        self.image_dirs = sorted(self.image_dirs, key=lambda x: int(x.split('_')[-1].split('.nii.gz')[0]))
-        self.label_dirs = sorted(self.label_dirs, key=lambda x: int(x.split('_')[-1].split('.nii.gz')[0]))
         self.sprvxl_dirs = glob.glob(os.path.join(args['data_dir'], 'supervoxels_' + str(args['n_sv']), 'super*'))
-        self.sprvxl_dirs = sorted(self.sprvxl_dirs, key=lambda x: int(x.split('_')[-1].split('.nii.gz')[0]))
+        _, aligned_paths = _align_case_paths(self.image_dirs, self.label_dirs, self.sprvxl_dirs)
+        self.image_dirs, self.label_dirs, self.sprvxl_dirs = aligned_paths
 
         # remove test fold!
         self.FOLD = get_folds(args['dataset'])
@@ -158,9 +243,57 @@ class TrainDataset(Dataset):
                 self.images[image_dir] = sitk.GetArrayFromImage(sitk.ReadImage(image_dir))
                 self.labels[label_dir] = sitk.GetArrayFromImage(sitk.ReadImage(label_dir))
                 self.sprvxls[sprvxl_dir] = sitk.GetArrayFromImage(sitk.ReadImage(sprvxl_dir))
+                shapes = {
+                    self.images[image_dir].shape,
+                    self.labels[label_dir].shape,
+                    self.sprvxls[sprvxl_dir].shape,
+                }
+                if len(shapes) != 1:
+                    raise ValueError(
+                        f'Image, label, and supervoxel shapes differ for case {_case_id(image_dir)}: '
+                        f'{sorted(shapes)}'
+                    )
+
+        self.episode_candidates = {}
+        for pat_idx in range(len(self.image_dirs)):
+            gt = self.labels[self.label_dirs[pat_idx]]
+            lbl = gt if self.use_gt else self.sprvxls[self.sprvxl_dirs[pat_idx]]
+            candidates = self._find_episode_candidates(lbl, gt)
+            if candidates:
+                self.episode_candidates[pat_idx] = candidates
+        if not self.episode_candidates:
+            raise RuntimeError(
+                'No valid training episodes remain; check min_size, held-out labels, and supervoxel inputs'
+            )
 
     def __len__(self):
         return self.max_iter
+
+    def _find_episode_candidates(self, lbl, gt):
+        unique = np.setdiff1d(np.unique(lbl), [0])
+        if self.use_gt:
+            unique = np.setdiff1d(unique, self.test_label)
+
+        required = (self.n_shot * self.n_way) + self.n_query
+        excluded = set(get_excluded_slice_indices(gt, self.exclude_label).tolist())
+        candidates = {}
+        for cls_idx in unique:
+            slice_indices = np.flatnonzero(np.sum(lbl == cls_idx, axis=(1, 2)) > 0)
+            slice_indices = np.array(
+                [slice_idx for slice_idx in slice_indices if slice_idx not in excluded],
+                dtype=np.int64,
+            )
+            lbl_cls = lbl == cls_idx
+            class_episodes = []
+            for run in _contiguous_runs(slice_indices):
+                for start in range(0, len(run) - required + 1):
+                    episode = run[start:start + required]
+                    max_size = max(np.count_nonzero(lbl_cls[slice_idx]) for slice_idx in episode)
+                    if max_size >= self.min_size:
+                        class_episodes.append(episode.copy())
+            if class_episodes:
+                candidates[cls_idx] = class_episodes
+        return candidates
 
     def gamma_tansform(self, img):
         gamma_range = (0.5, 1.5)
@@ -211,7 +344,7 @@ class TrainDataset(Dataset):
     def __getitem__(self, idx):
 
         # sample patient idx
-        pat_idx = random.choice(range(len(self.image_dirs)))
+        pat_idx = random.choice(list(self.episode_candidates))
 
         if self.read:
             # get image/supervoxel volume from dictionary
@@ -224,17 +357,8 @@ class TrainDataset(Dataset):
             gt = sitk.GetArrayFromImage(sitk.ReadImage(self.label_dirs[pat_idx]))
             sprvxl = sitk.GetArrayFromImage(sitk.ReadImage(self.sprvxl_dirs[pat_idx]))
 
-        if self.exclude_label is not None:  # identify the slices containing test labels
-            idx = np.arange(gt.shape[0])
-            exclude_idx = np.full(gt.shape[0], True, dtype=bool)
-            for i in range(len(self.exclude_label)):
-                exclude_idx = exclude_idx & (np.sum(gt == self.exclude_label[i], axis=(1, 2)) > 0)
-            exclude_idx = idx[exclude_idx]
-        else:
-            exclude_idx = []
-
         # normalize
-        img = (img - img.mean()) / img.std()
+        img = _standardize_volume(img)
 
         # chose training label
         if self.use_gt:
@@ -243,52 +367,11 @@ class TrainDataset(Dataset):
             lbl = sprvxl.copy()
         # lbl is label numpy
 
-        # sample class(es) (gt/supervoxel)
-        unique = list(np.unique(lbl))
-        unique.remove(0)
-        if self.use_gt:
-            unique = list(set(unique) - set(self.test_label))
-
-        size = 0
-        while size < self.min_size:
-            n_slices = (self.n_shot * self.n_way) + self.n_query - 1
-            while n_slices < ((self.n_shot * self.n_way) + self.n_query):
-
-                cls_idx = random.choice(unique)   # cls_idx is sampled class id
-
-                # extract slices containing the sampled class
-                sli_idx = np.sum(lbl == cls_idx, axis=(1, 2)) > 0
-                idx = np.arange(lbl.shape[0])
-                sli_idx = idx[sli_idx]
-                sli_idx = list(set(sli_idx) - set(np.intersect1d(sli_idx, exclude_idx)))  # remove slices containing test labels
-                n_slices = len(sli_idx)
-
-            # generate possible subsets with successive slices (size = self.n_shot * self.n_way + self.n_query)
-            subsets = []
-            for i in range(len(sli_idx)):
-                if not subsets:
-                    subsets.append([sli_idx[i]])
-                elif sli_idx[i - 1] + 1 == sli_idx[i]:
-                    subsets[-1].append(sli_idx[i])
-                else:
-                    subsets.append([sli_idx[i]])
-            i = 0
-            while i < len(subsets):
-                if len(subsets[i]) < (self.n_shot * self.n_way + self.n_query):
-                    del subsets[i]
-                else:
-                    i += 1
-            if not len(subsets):
-                return self.__getitem__(idx + np.random.randint(low=0, high=self.max_iter - 1, size=(1,)))
-
-            # sample support and query slices
-            i = random.choice(np.arange(len(subsets)))  # subset index
-            i = random.choice(subsets[i][:-(self.n_shot * self.n_way + self.n_query - 1)])
-            sample = np.arange(i, i + (self.n_shot * self.n_way) + self.n_query)
-
-            lbl_cls = 1 * (lbl == cls_idx)
-
-            size = max(np.sum(lbl_cls[sample[0]]), np.sum(lbl_cls[sample[1]]))
+        # Sample a class uniformly, then one of its valid contiguous episodes.
+        candidates = self.episode_candidates[pat_idx]
+        cls_idx = random.choice(list(candidates))
+        sample = random.choice(candidates[cls_idx])
+        lbl_cls = 1 * (lbl == cls_idx)
 
         # invert order
         if np.random.random(1) > 0.5:
